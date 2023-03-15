@@ -13,7 +13,7 @@
 #// limitations under the License.
 [package]
 name = "d3ne"
-version = "0.7.7"
+version = "0.7.8-pre.0"
 authors = ["lemonxah <lemon.xah@gmail.com>", "stringhandler <stringhandler@gmail.com>"]
 edition = "2021"
 description = "Rust D3 Node Engine implementation that works with retejs, still a work in progress"
