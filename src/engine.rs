@@ -1,3 +1,16 @@
+// Original Copyright © 2021 lemonxah
+// Modified Copyright © 2022 stringhandler
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 use crate::workers::Workers;
 use crate::{node::*, WorkerError};
 use anyhow::Result;
@@ -16,18 +29,15 @@ pub enum EngineError {
     Other(#[from] anyhow::Error),
 }
 
-pub struct Engine<'a> {
-    id: &'a str,
-    workers: Workers,
+pub struct Engine<TContext> {
+    id: String,
+    workers: Workers<TContext>,
 }
 
 #[allow(dead_code)]
-impl<'a> Engine<'a> {
-    pub fn new(id: &'a str, workers: Workers) -> Engine<'a> {
-        Engine {
-            id: id,
-            workers: workers,
-        }
+impl<TContext> Engine<TContext> {
+    pub fn new(id: String, workers: Workers<TContext>) -> Self {
+        Self { id, workers }
     }
 
     pub fn parse_json(&self, json: &str) -> Result<HashMap<i64, Node>> {
@@ -44,19 +54,25 @@ impl<'a> Engine<'a> {
             bail!(EngineError::VersionMismatch(self.id.to_string(), version));
         }
         let nodess: HashMap<String, Node> = serde_json::from_value(value["nodes"].clone())?;
-        Ok(nodess
+        nodess
             .into_iter()
             .map(|(k, v)| Ok((k.parse::<i64>()?, v)))
-            .collect::<Result<HashMap<_, _>>>()?)
+            .collect::<Result<HashMap<_, _>>>()
     }
 
     /// Consumes engine
-    pub fn process(self, nodes: &'a HashMap<i64, Node>, start_node_id: i64) -> Result<OutputData> {
+    pub fn process(
+        self,
+        context: &TContext,
+        nodes: &HashMap<i64, Node>,
+        start_node_id: i64,
+    ) -> Result<OutputData> {
         let mut cache: HashMap<i64, OutputData> = HashMap::new();
         let mut closed_nodes: Vec<i64> = Vec::new();
         let end_id = self.process_nodes(
+            context,
             &nodes[&start_node_id],
-            &nodes,
+            nodes,
             &mut cache,
             &mut closed_nodes,
         )?;
@@ -65,8 +81,9 @@ impl<'a> Engine<'a> {
 
     fn process_node(
         &self,
-        node: &'a Node,
-        nodes: &'a HashMap<i64, Node>,
+        context: &TContext,
+        node: &Node,
+        nodes: &HashMap<i64, Node>,
         cache: &mut HashMap<i64, OutputData>,
         closed_nodes: &mut Vec<i64>,
     ) -> Result<OutputData, EngineError> {
@@ -81,13 +98,12 @@ impl<'a> Engine<'a> {
         for (name, input) in node.inputs.clone().unwrap_or_default().inner() {
             for conn in &input.connections {
                 if !closed_nodes.contains(&conn.node) {
-                    let out = self.process_node(&nodes[&conn.node], nodes, cache, closed_nodes)?;
+                    let out =
+                        self.process_node(context, &nodes[&conn.node], nodes, cache, closed_nodes)?;
                     input_data.push((name.clone(), out.clone().into()));
-                    if !out.clone().contains_key(&conn.output) {
-                        if conn.output != "action" {
-                            self.disable_node_tree(&nodes[&conn.node], nodes, closed_nodes);
-                            self.disable_node_tree(node, nodes, closed_nodes);
-                        }
+                    if !out.clone().contains_key(&conn.output) && conn.output != "action" {
+                        Self::disable_node_tree(&nodes[&conn.node], nodes, closed_nodes);
+                        Self::disable_node_tree(node, nodes, closed_nodes);
                     }
                 }
             }
@@ -96,53 +112,50 @@ impl<'a> Engine<'a> {
         if !closed_nodes.contains(&node.id) {
             output = self.workers.call(
                 &node.name,
+                context,
                 node,
                 input_data
                     .into_iter()
-                    .fold(InputDataBuilder::new(), |b, (key, data)| {
+                    .fold(InputDataBuilder::default(), |b, (key, data)| {
                         b.add_data(key, data)
                     })
                     .build(),
             )?;
             cache.insert(node.id, output.clone().into());
         }
-        return Ok(output);
+        Ok(output)
     }
 
     fn process_nodes(
         &self,
-        node: &'a Node,
-        nodes: &'a HashMap<i64, Node>,
+        context: &TContext,
+        node: &Node,
+        nodes: &HashMap<i64, Node>,
         cache: &mut HashMap<i64, OutputData>,
         closed_nodes: &mut Vec<i64>,
     ) -> Result<i64, EngineError> {
         let mut id: i64 = node.id;
         if !closed_nodes.contains(&node.id) {
-            let outputdata = self.process_node(&node, &nodes, cache, closed_nodes)?;
+            let outputdata = self.process_node(context, node, nodes, cache, closed_nodes)?;
             for (name, output) in node.outputs.clone().unwrap_or_default().inner() {
                 if outputdata.contains_key(name) {
                     for connection in &output.connections {
                         if !closed_nodes.contains(&connection.node) {
                             id = self.process_nodes(
+                                context,
                                 &nodes[&connection.node],
-                                &nodes,
+                                nodes,
                                 cache,
                                 closed_nodes,
                             )?;
                         }
                     }
-                } else {
-                    if name != "action" {
-                        for connection in &output.connections {
-                            if connection.input == name.clone()
-                                && !closed_nodes.contains(&connection.node)
-                            {
-                                self.disable_node_tree(
-                                    &nodes[&connection.node],
-                                    nodes,
-                                    closed_nodes,
-                                );
-                            }
+                } else if name != "action" {
+                    for connection in &output.connections {
+                        if connection.input == name.clone()
+                            && !closed_nodes.contains(&connection.node)
+                        {
+                            Self::disable_node_tree(&nodes[&connection.node], nodes, closed_nodes);
                         }
                     }
                 }
@@ -152,7 +165,6 @@ impl<'a> Engine<'a> {
     }
 
     fn disable_node_tree(
-        &self,
         node: &'_ Node,
         nodes: &HashMap<i64, Node>,
         closed_nodes: &mut Vec<i64>,
@@ -164,24 +176,21 @@ impl<'a> Engine<'a> {
                     if !closed_nodes.contains(&node.id) {
                         closed_nodes.push(node.id);
                     }
-                    for (_, output) in node.outputs.clone().unwrap_or_default().inner() {
+                    for output in node.outputs.clone().unwrap_or_default().inner().values() {
                         for connection in &output.connections {
                             let _node = &nodes[&connection.node];
-                            match _node.inputs.clone().unwrap_or_default().get("action") {
-                                None => (),
-                                Some(input) => {
-                                    if let Some(_) = input
-                                        .connections
-                                        .clone()
-                                        .into_iter()
-                                        .find(|c| c.node == connection.node)
-                                    {
-                                        self.disable_node_tree(
-                                            &nodes[&connection.node],
-                                            nodes,
-                                            closed_nodes,
-                                        );
-                                    }
+                            if let Some(input) = _node.inputs.clone().unwrap_or_default().get("action") {
+                                if input
+                                    .connections
+                                    .clone()
+                                    .into_iter()
+                                    .any(|c| c.node == connection.node)
+                                {
+                                    Self::disable_node_tree(
+                                        &nodes[&connection.node],
+                                        nodes,
+                                        closed_nodes,
+                                    );
                                 }
                             }
                         }
