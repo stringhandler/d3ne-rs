@@ -12,8 +12,8 @@
 #// See the License for the specific language governing permissions and
 #// limitations under the License.
 [package]
-name = "d3ne"d
-version = "0.7.6"
+name = "d3ne"
+version = "0.7.7"
 authors = ["lemonxah <lemon.xah@gmail.com>", "stringhandler <stringhandler@gmail.com>"]
 edition = "2021"
 description = "Rust D3 Node Engine implementation that works with retejs, still a work in progress"
