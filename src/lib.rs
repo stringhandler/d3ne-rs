@@ -1,3 +1,16 @@
+// Original Copyright © 2021 lemonxah
+// Modified Copyright © 2022 stringhandler
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 #[macro_use]
 extern crate anyhow;
 
@@ -168,10 +181,10 @@ mod tests {
         let mut workers = WorkersBuilder::new();
         workers.add(Number).add(Add).add(Multiply);
 
-        let engine = Engine::new("demo@0.1.1", workers.build());
+        let engine = Engine::<()>::new("demo@0.1.1".to_string(), workers.build());
         let nodes = engine.parse_json(json_data).unwrap();
         let nn = nodes.clone();
-        let output = engine.process(&nn, 1);
+        let output = engine.process(&(), &nn, 1);
         let oo = output.unwrap();
         let result = oo["num"].get::<i64>().unwrap();
         assert_eq!(result, &8i64);
@@ -330,9 +343,9 @@ mod tests {
         workers.add(Number);
         workers.add(Add);
 
-        let engine = Engine::new("demo@0.1.0", workers.build());
+        let engine = Engine::new("demo@0.1.0".to_string(), workers.build());
         let nodes = engine.parse_json(json_data).unwrap();
-        let output = engine.process(&nodes, 1);
+        let output = engine.process(&(), &nodes, 1);
         let oo = output.unwrap();
         let result = oo["num"].get::<i64>().unwrap();
         assert_eq!(result, &7i64);
@@ -487,9 +500,9 @@ mod tests {
         workers.add(Number);
         workers.add(Add);
 
-        let engine = Engine::new("demo@0.1.0", workers.build());
+        let engine = Engine::new("demo@0.1.0".to_string(), workers.build());
         let nodes = engine.parse_json(json_data).unwrap();
-        let output = engine.process(&nodes, 1);
+        let output = engine.process(&(), &nodes, 1);
         // Node[1]: Node input conversion error: Field: num, Type: i64
         let err: anyhow::Error = output.err().unwrap();
         let expected: anyhow::Error = anyhow!(WorkerError::NodeRunError(
@@ -504,12 +517,12 @@ mod tests {
     }
 
     struct Number;
-    impl Worker for Number {
+    impl Worker<()> for Number {
         fn name(&self) -> &str {
             "Number"
         }
 
-        fn work(&self, node: &Node, input_data: InputData) -> Result<OutputData> {
+        fn work(&self, context: &(), node: &Node, input_data: InputData) -> Result<OutputData> {
             let result = node.get_number_field("num", &input_data)?;
             Ok(OutputDataBuilder::new()
                 .data("num", Box::new(result))
@@ -518,12 +531,12 @@ mod tests {
     }
 
     struct Add;
-    impl Worker for Add {
+    impl Worker<()> for Add {
         fn name(&self) -> &str {
             "Add"
         }
 
-        fn work(&self, node: &Node, input_data: InputData) -> Result<OutputData> {
+        fn work(&self, context: &(), node: &Node, input_data: InputData) -> Result<OutputData> {
             let num = node.get_number_field("num", &input_data)?;
             let num2 = node.get_number_field("num2", &input_data)?;
             Ok(OutputDataBuilder::new()
@@ -533,12 +546,12 @@ mod tests {
     }
 
     struct Multiply;
-    impl Worker for Multiply {
+    impl Worker<()> for Multiply {
         fn name(&self) -> &str {
             "Multiply"
         }
 
-        fn work(&self, node: &Node, input_data: InputData) -> Result<OutputData> {
+        fn work(&self, context: &(), node: &Node, input_data: InputData) -> Result<OutputData> {
             let num = node.get_number_field("num", &input_data)?;
             let num2 = node.get_number_field("num2", &input_data)?;
             Ok(OutputDataBuilder::new()

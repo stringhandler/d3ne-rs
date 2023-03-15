@@ -1,7 +1,19 @@
+// Original Copyright © 2021 lemonxah
+// Modified Copyright © 2022 stringhandler
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 use crate::target::{Inputs, Outputs};
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
-use serde_json::json;
 use serde_json::{Number, Value};
 use std::any::{Any, TypeId};
 use std::collections::HashMap;
@@ -17,13 +29,13 @@ pub struct IOData {
 #[allow(dead_code)]
 impl IOData {
     pub fn is<B: Any>(&self) -> bool {
-        return TypeId::of::<B>() == (*self.data).type_id();
+        TypeId::of::<B>() == (*self.data).type_id()
     }
     pub fn get<A>(&self) -> Option<&A>
     where
         A: 'static,
     {
-        return self.data.downcast_ref::<A>();
+        self.data.downcast_ref::<A>()
     }
 }
 
@@ -57,22 +69,20 @@ impl From<Rc<HashMap<String, NodeResult>>> for OutputData {
     }
 }
 
-pub struct OutputDataBuilder<'a> {
-    data: Vec<(&'a str, Box<dyn Any>)>,
+#[derive(Default)]
+pub struct OutputDataBuilder {
+    data: Vec<(String, Box<dyn Any>)>,
 }
 
-impl<'a> OutputDataBuilder<'a> {
-    pub fn new() -> OutputDataBuilder<'a> {
-        OutputDataBuilder { data: vec![] }
-    }
+impl OutputDataBuilder {
 
-    pub fn add_data(&mut self, key: &'a str, data: Box<dyn Any>) -> &mut Self {
-        self.data.push((key, data));
+    pub fn add_data<S: ToString>(&mut self, key: S, data: Box<dyn Any>) -> &mut Self {
+        self.data.push((key.to_string(), data));
         self
     }
 
-    pub fn data(mut self, key: &'a str, data: Box<dyn Any>) -> Self {
-        self.data.push((key, data));
+    pub fn data<S:ToString>(mut self, key: S, data: Box<dyn Any>) -> Self {
+        self.data.push((key.to_string(), data));
         self
     }
 
@@ -80,7 +90,7 @@ impl<'a> OutputDataBuilder<'a> {
         OutputData(Rc::new(
             self.data
                 .into_iter()
-                .map(|(key, data)| (key.into(), NodeResult(IOData { data })))
+                .map(|(key, data)| (key, NodeResult(IOData { data })))
                 .collect::<HashMap<_, _>>(),
         ))
     }
@@ -97,14 +107,13 @@ impl Deref for OutputData {
 #[derive(Debug)]
 pub struct InputData(pub HashMap<String, OutputData>);
 
+#[derive(Default)]
 pub struct InputDataBuilder {
     data: Vec<(String, OutputData)>,
 }
 
 impl InputDataBuilder {
-    pub fn new() -> InputDataBuilder {
-        InputDataBuilder { data: vec![] }
-    }
+
 
     pub fn add_data(mut self, key: String, data: OutputData) -> InputDataBuilder {
         self.data.push((key, data));
@@ -115,7 +124,7 @@ impl InputDataBuilder {
         InputData(
             self.data
                 .into_iter()
-                .map(|(key, data)| (key.into(), data))
+                .map(|(key, data)| (key, data))
                 .collect::<HashMap<_, _>>(),
         )
     }
@@ -146,145 +155,147 @@ pub struct Node {
 }
 
 impl Node {
-    fn get_field<A>(
-        &self,
-        field: &'static str,
-        inputs: &InputData,
-        def: A,
-        deref: Box<dyn Fn(&A) -> A>,
-        convert: Box<dyn Fn(&Value) -> Result<A>>,
-        noerr: Option<A>,
-    ) -> Result<A>
-    where
-        A: 'static,
-    {
-        inputs
-            .0
-            .get(field)
-            .and_then(|i| {
-                i.get(
-                    &self
-                        .inputs
-                        .clone()
-                        .map(|i| i[field].connections[0].output.clone())
-                        .unwrap_or_default(),
-                )
-            })
-            .map(|v| Ok(v.get::<A>().map(deref).unwrap_or(def)))
-            .or(self
-                .data
-                .clone()
-                .and_then(|d| d.get(field).map(|v| convert(v))))
-            .or(noerr.map(Ok))
-            .unwrap_or(Err(anyhow!("{}", NodeError::NoValueFound(field.into()))))
-    }
+    // // TODO: fix this complex type
+    // #[allow(clippy::type_complexity)]
+    // fn get_field<A, S: AsRef<str>> (
+    //     &self,
+    //     field: S,
+    //     inputs: &InputData,
+    //     def: A,
+    //     deref: Box<dyn Fn(&A) -> A>,
+    //     convert: Box<dyn Fn(&Value) -> Result<A>>,
+    //     noerr: Option<A>,
+    // ) -> Result<A>
+    // where
+    //     A: 'static,
+    // {
+    //     inputs
+    //         .0
+    //         .get(field.as_ref())
+    //         .and_then(|i| {
+    //             i.get(
+    //                 &self
+    //                     .inputs
+    //                     .clone()
+    //                     .map(|i| i[field.as_ref()].connections[0].output.clone())
+    //                     .unwrap_or_default(),
+    //             )
+    //         })
+    //         .map(|v| Ok(v.get::<A>().map(deref).unwrap_or(def)))
+    //         .or(self
+    //             .data
+    //             .clone()
+    //             .and_then(|d| d.get(field.as_ref()).map(|v| convert(v))))
+    //         .or(noerr.map(Ok))
+    //         .unwrap_or(Err(anyhow!("{}", NodeError::NoValueFound(field.as_ref().to_string()))))
+    // }
 
     // // TODO: Remove 'static from above method
     // pub fn get_field_t<T:Default + Clone + DeserializeOwned + 'static>(&self, field: &str, inputs: &InputData) -> Result<T> {
     //   self.get_field(field, inputs, T::default(), Box::new(|t| t.clone()), Box::new(|v| serde_json::from_value(v.clone()).unwrap()), None)
     // }
 
-    pub fn get_number_field_or(
-        &self,
-        field: &'static str,
-        inputs: &InputData,
-        default: Option<i64>,
-    ) -> Result<i64> {
-        self.get_field(
-            field,
-            inputs,
-            i64::MIN,
-            Box::new(|r| *r),
-            Box::new(|v| {
-                v.as_i64().ok_or(anyhow!(NodeError::ConversionError(format!(
-                    "Field: {}, Type: {}",
-                    field.to_string(),
-                    std::any::type_name::<i64>()
-                ))))
-            }),
-            default,
-        )
-    }
+    // pub fn get_number_field_or<S: AsRef<str>>(
+    //     &self,
+    //     field: S,
+    //     inputs: &InputData,
+    //     default: Option<i64>,
+    // ) -> Result<i64> {
+    //     self.get_field(
+    //         field,
+    //         inputs,
+    //         i64::MIN,
+    //         Box::new(|r| *r),
+    //         Box::new(|v| {
+    //             v.as_i64().ok_or(anyhow!(NodeError::ConversionError(format!(
+    //                 "Field: {}, Type: {}",
+    //                 field.as_ref(),
+    //                 std::any::type_name::<i64>()
+    //             ))))
+    //         }),
+    //         default,
+    //     )
+    // }
+    //
+    // pub fn get_float_number_field_or(
+    //     &self,
+    //     field: &'static str,
+    //     inputs: &InputData,
+    //     default: Option<f64>,
+    // ) -> Result<f64> {
+    //     self.get_field(
+    //         field,
+    //         inputs,
+    //         f64::MIN,
+    //         Box::new(|r| *r),
+    //         Box::new(|v| {
+    //             v.as_f64().ok_or(anyhow!(NodeError::ConversionError(format!(
+    //                 "Field: {}, Type: {}",
+    //                 field,
+    //                 std::any::type_name::<f64>()
+    //             ))))
+    //         }),
+    //         default,
+    //     )
+    // }
 
-    pub fn get_float_number_field_or(
-        &self,
-        field: &'static str,
-        inputs: &InputData,
-        default: Option<f64>,
-    ) -> Result<f64> {
-        self.get_field(
-            field,
-            inputs,
-            f64::MIN,
-            Box::new(|r| *r),
-            Box::new(|v| {
-                v.as_f64().ok_or(anyhow!(NodeError::ConversionError(format!(
-                    "Field: {}, Type: {}",
-                    field.to_string(),
-                    std::any::type_name::<f64>()
-                ))))
-            }),
-            default,
-        )
-    }
+    // pub fn get_string_field_or(
+    //     &self,
+    //     field: &'static str,
+    //     inputs: &InputData,
+    //     default: Option<String>,
+    // ) -> Result<String> {
+    //     self.get_field(
+    //         field,
+    //         inputs,
+    //         String::default(),
+    //         Box::new(|r| r.to_owned()),
+    //         Box::new(|v| {
+    //             if let Value::String(s) = v {
+    //                 Ok(s.clone())
+    //             } else {
+    //                 Err(anyhow!(NodeError::ConversionError(format!(
+    //                     "Field: {}, Type: {}",
+    //                     field,
+    //                     std::any::type_name::<String>()
+    //                 ))))
+    //             }
+    //         }),
+    //         default,
+    //     )
+    // }
 
-    pub fn get_string_field_or(
-        &self,
-        field: &'static str,
-        inputs: &InputData,
-        default: Option<String>,
-    ) -> Result<String> {
-        self.get_field(
-            field,
-            inputs,
-            String::default(),
-            Box::new(|r| r.to_owned()),
-            Box::new(|v| {
-                if let Value::String(s) = v {
-                    Ok(s.clone())
-                } else {
-                    Err(anyhow!(NodeError::ConversionError(format!(
-                        "Field: {}, Type: {}",
-                        field.to_string(),
-                        std::any::type_name::<String>()
-                    ))))
-                }
-            }),
-            default,
-        )
-    }
-
-    pub fn get_json_field_or(
-        &self,
-        field: &'static str,
-        inputs: &InputData,
-        default: Option<Value>,
-    ) -> Result<Value> {
-        self.get_field(
-            field,
-            inputs,
-            json!({}),
-            Box::new(|r| r.clone()),
-            Box::new(|v| {
-                serde_json::from_str(v.as_str().ok_or(anyhow!(
-                    "Field: {}, unable to get str value for deserialze",
-                    field.to_string()
-                ))?)
-                .map_err(|e| {
-                    anyhow!(NodeError::DeserializeError(
-                        field.to_string(),
-                        format!(
-                            "[{:?}]json({})",
-                            TypeId::of::<Value>(),
-                            v.as_str().unwrap_or_default().to_string()
-                        ),
-                        e
-                    ))
-                })
-            }),
-            default,
-        )
-    }
+    // pub fn get_json_field_or(
+    //     &self,
+    //     field: &'static str,
+    //     inputs: &InputData,
+    //     default: Option<Value>,
+    // ) -> Result<Value> {
+    //     self.get_field(
+    //         field,
+    //         inputs,
+    //         json!({}),
+    //         Box::new(|r| r.clone()),
+    //         Box::new(|v| {
+    //             serde_json::from_str(v.as_str().ok_or(anyhow!(
+    //                 "Field: {}, unable to get str value for deserialze",
+    //                 field.to_string()
+    //             ))?)
+    //             .map_err(|e| {
+    //                 anyhow!(NodeError::DeserializeError(
+    //                     field.to_string(),
+    //                     format!(
+    //                         "[{:?}]json({})",
+    //                         TypeId::of::<Value>(),
+    //                         v.as_str().unwrap_or_default()
+    //                     ),
+    //                     e
+    //                 ))
+    //             })
+    //         }),
+    //         default,
+    //     )
+    // }
 
     pub fn get_as_json_field_or(
         &self,
@@ -294,7 +305,7 @@ impl Node {
     ) -> Result<Value> {
         let err = format!(
             "Field: {}, No josn, bool, i64, f64 or String value found",
-            field.to_string()
+            field
         );
         inputs
             .get(field)
@@ -309,7 +320,7 @@ impl Node {
                 .map(|r| {
                     let NodeResult(v) = r;
                     if v.is::<Value>() {
-                        v.get::<Value>().map(|v| v.clone()).ok_or(anyhow!(
+                        v.get::<Value>().cloned().ok_or_else(||anyhow!(
                             NodeError::ConversionError(
                                 "Unable to get `Value` as json field".to_owned()
                             )
@@ -350,26 +361,26 @@ impl Node {
                 .clone()
                 .and_then(|d| d.get(field).map(|v| Ok(v.clone()))))
             .or(default.map(Ok))
-            .unwrap_or(Err(anyhow!(err.to_owned())))
+            .unwrap_or(Err(anyhow!(err)))
     }
 
     pub fn get_as_json_field(&self, field: &'static str, inputs: &InputData) -> Result<Value> {
         self.get_as_json_field_or(field, inputs, None)
     }
 
-    pub fn get_string_field(&self, field: &'static str, inputs: &InputData) -> Result<String> {
-        self.get_string_field_or(field, inputs, None)
-    }
+    // pub fn get_string_field(&self, field: &'static str, inputs: &InputData) -> Result<String> {
+    //     self.get_string_field_or(field, inputs, None)
+    // }
+    //
+    // pub fn get_number_field(&self, field: &'static str, inputs: &InputData) -> Result<i64> {
+    //     self.get_number_field_or(field, inputs, None)
+    // }
+    //
+    // pub fn get_float_number_field(&self, field: &'static str, inputs: &InputData) -> Result<f64> {
+    //     self.get_float_number_field_or(field, inputs, None)
+    // }
 
-    pub fn get_number_field(&self, field: &'static str, inputs: &InputData) -> Result<i64> {
-        self.get_number_field_or(field, inputs, None)
-    }
-
-    pub fn get_float_number_field(&self, field: &'static str, inputs: &InputData) -> Result<f64> {
-        self.get_float_number_field_or(field, inputs, None)
-    }
-
-    pub fn get_json_field(&self, field: &'static str, inputs: &InputData) -> Result<Value> {
-        self.get_json_field_or(field, inputs, None)
-    }
+    // pub fn get_json_field(&self, field: &'static str, inputs: &InputData) -> Result<Value> {
+    //     self.get_json_field_or(field, inputs, None)
+    // }
 }
