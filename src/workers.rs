@@ -50,9 +50,15 @@ impl<TContext> Workers<TContext> {
     }
 }
 
-#[derive(Default)]
 pub struct WorkersBuilder<TContext> {
     data: Vec<(String, Box<dyn Worker<TContext>>)>,
+}
+
+
+impl<T> Default for WorkersBuilder<T> {
+    fn default() -> Self {
+        Self { data: vec![] }
+    }
 }
 
 #[allow(dead_code)]
