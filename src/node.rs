@@ -48,6 +48,16 @@ impl OutputValue {
             }),
         }
     }
+
+    pub fn as_bytes(&self) -> Result<&[u8], EngineError> {
+        match self {
+            OutputValue::Bytes(b) => Ok(b),
+            _ => Err(EngineError::InvalidOutputType {
+                expected: "bytes".to_string(),
+                actual: self.to_string(),
+            }),
+        }
+    }
 }
 
 #[derive(Debug, Error)]
