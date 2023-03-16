@@ -25,6 +25,7 @@ use thiserror::Error;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum OutputValue {
     String(String),
+    Bytes(Vec<u8>),
     I64(i64),
     U64(u64),
 }
@@ -35,6 +36,7 @@ impl Display for OutputValue {
             OutputValue::String(s) => write!(f, "String: {}", s),
             OutputValue::I64(i) => write!(f, "I64: {}", i),
             OutputValue::U64(u) => write!(f, "U64: {}", u),
+            OutputValue::Bytes(b) => write!(f, "Bytes: {:?}", b),
         }
     }
 }
@@ -51,24 +53,6 @@ impl OutputValue {
     }
 }
 
-#[derive(Debug)]
-pub struct IOData {
-    pub data: Box<dyn Any>,
-}
-
-#[allow(dead_code)]
-impl IOData {
-    pub fn is<B: Any>(&self) -> bool {
-        TypeId::of::<B>() == (*self.data).type_id()
-    }
-    pub fn get<A>(&self) -> Option<&A>
-    where
-        A: 'static,
-    {
-        self.data.downcast_ref::<A>()
-    }
-}
-
 #[derive(Debug, Error)]
 pub enum NodeError {
     #[error("Node input conversion error: {0}")]
@@ -77,96 +61,6 @@ pub enum NodeError {
     NoValueFound(String),
     #[error("Field: {0}, Value: {1}, Deserialization error: {2}")]
     DeserializeError(String, String, serde_json::Error),
-}
-
-#[derive(Debug)]
-pub struct NodeResult(pub IOData);
-
-impl Deref for NodeResult {
-    type Target = IOData;
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-#[derive(Debug)]
-pub struct OutputData(pub Rc<HashMap<String, NodeResult>>);
-
-impl From<Rc<HashMap<String, NodeResult>>> for OutputData {
-    fn from(inner: Rc<HashMap<String, NodeResult>>) -> Self {
-        OutputData(inner)
-    }
-}
-
-#[derive(Default)]
-pub struct OutputDataBuilder {
-    data: Vec<(String, Box<dyn Any>)>,
-}
-
-impl OutputDataBuilder {
-    pub fn add_data<S: ToString>(&mut self, key: S, data: Box<dyn Any>) -> &mut Self {
-        self.data.push((key.to_string(), data));
-        self
-    }
-
-    pub fn data<S: ToString>(mut self, key: S, data: Box<dyn Any>) -> Self {
-        self.data.push((key.to_string(), data));
-        self
-    }
-
-    pub fn build(self) -> OutputData {
-        OutputData(Rc::new(
-            self.data
-                .into_iter()
-                .map(|(key, data)| (key, NodeResult(IOData { data })))
-                .collect::<HashMap<_, _>>(),
-        ))
-    }
-}
-
-impl Deref for OutputData {
-    type Target = Rc<HashMap<String, NodeResult>>;
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-#[allow(dead_code)]
-#[derive(Debug)]
-pub struct InputData(pub HashMap<String, OutputData>);
-
-#[derive(Default)]
-pub struct InputDataBuilder {
-    data: Vec<(String, OutputData)>,
-}
-
-impl InputDataBuilder {
-    pub fn add_data(mut self, key: String, data: OutputData) -> InputDataBuilder {
-        self.data.push((key, data));
-        self
-    }
-
-    pub fn build(self) -> InputData {
-        InputData(
-            self.data
-                .into_iter()
-                .map(|(key, data)| (key, data))
-                .collect::<HashMap<_, _>>(),
-        )
-    }
-}
-
-impl From<HashMap<String, OutputData>> for InputData {
-    fn from(inner: HashMap<String, OutputData>) -> Self {
-        InputData(inner)
-    }
-}
-
-impl Deref for InputData {
-    type Target = HashMap<String, OutputData>;
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
