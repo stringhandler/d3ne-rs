@@ -11,15 +11,45 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-use crate::target::{Inputs, Outputs};
+use crate::{EngineError, Input, Output};
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
-use serde_json::{Number, Value};
+use serde_json::Value;
 use std::any::{Any, TypeId};
 use std::collections::HashMap;
+use std::fmt::{Display, Formatter};
 use std::ops::Deref;
 use std::rc::Rc;
 use thiserror::Error;
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum OutputValue {
+    String(String),
+    I64(i64),
+    U64(u64),
+}
+
+impl Display for OutputValue {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            OutputValue::String(s) => write!(f, "String: {}", s),
+            OutputValue::I64(i) => write!(f, "I64: {}", i),
+            OutputValue::U64(u) => write!(f, "U64: {}", u),
+        }
+    }
+}
+
+impl OutputValue {
+    pub fn as_i64(&self) -> Result<i64, EngineError> {
+        match self {
+            OutputValue::I64(i) => Ok(*i),
+            _ => Err(EngineError::InvalidOutputType {
+                expected: "i64".to_string(),
+                actual: self.to_string(),
+            }),
+        }
+    }
+}
 
 #[derive(Debug)]
 pub struct IOData {
@@ -59,7 +89,6 @@ impl Deref for NodeResult {
     }
 }
 
-#[allow(dead_code)]
 #[derive(Debug)]
 pub struct OutputData(pub Rc<HashMap<String, NodeResult>>);
 
@@ -75,13 +104,12 @@ pub struct OutputDataBuilder {
 }
 
 impl OutputDataBuilder {
-
     pub fn add_data<S: ToString>(&mut self, key: S, data: Box<dyn Any>) -> &mut Self {
         self.data.push((key.to_string(), data));
         self
     }
 
-    pub fn data<S:ToString>(mut self, key: S, data: Box<dyn Any>) -> Self {
+    pub fn data<S: ToString>(mut self, key: S, data: Box<dyn Any>) -> Self {
         self.data.push((key.to_string(), data));
         self
     }
@@ -113,8 +141,6 @@ pub struct InputDataBuilder {
 }
 
 impl InputDataBuilder {
-
-
     pub fn add_data(mut self, key: String, data: OutputData) -> InputDataBuilder {
         self.data.push((key, data));
         self
@@ -147,240 +173,82 @@ impl Deref for InputData {
 pub struct Node {
     pub id: i64,
     pub name: String,
-    pub data: Option<Value>,
+    #[serde(default)]
+    pub data: HashMap<String, Value>,
     pub group: Option<i64>,
     pub position: Option<Vec<f32>>,
-    pub inputs: Option<Inputs>,
-    pub outputs: Option<Outputs>,
+    #[serde(default)]
+    pub inputs: HashMap<String, Input>,
+    #[serde(default)]
+    pub outputs: HashMap<String, Output>,
 }
 
 impl Node {
-    // // TODO: fix this complex type
-    // #[allow(clippy::type_complexity)]
-    // fn get_field<A, S: AsRef<str>> (
-    //     &self,
-    //     field: S,
-    //     inputs: &InputData,
-    //     def: A,
-    //     deref: Box<dyn Fn(&A) -> A>,
-    //     convert: Box<dyn Fn(&Value) -> Result<A>>,
-    //     noerr: Option<A>,
-    // ) -> Result<A>
-    // where
-    //     A: 'static,
-    // {
-    //     inputs
-    //         .0
-    //         .get(field.as_ref())
-    //         .and_then(|i| {
-    //             i.get(
-    //                 &self
-    //                     .inputs
-    //                     .clone()
-    //                     .map(|i| i[field.as_ref()].connections[0].output.clone())
-    //                     .unwrap_or_default(),
-    //             )
-    //         })
-    //         .map(|v| Ok(v.get::<A>().map(deref).unwrap_or(def)))
-    //         .or(self
-    //             .data
-    //             .clone()
-    //             .and_then(|d| d.get(field.as_ref()).map(|v| convert(v))))
-    //         .or(noerr.map(Ok))
-    //         .unwrap_or(Err(anyhow!("{}", NodeError::NoValueFound(field.as_ref().to_string()))))
-    // }
-
-    // // TODO: Remove 'static from above method
-    // pub fn get_field_t<T:Default + Clone + DeserializeOwned + 'static>(&self, field: &str, inputs: &InputData) -> Result<T> {
-    //   self.get_field(field, inputs, T::default(), Box::new(|t| t.clone()), Box::new(|v| serde_json::from_value(v.clone()).unwrap()), None)
-    // }
-
-    // pub fn get_number_field_or<S: AsRef<str>>(
-    //     &self,
-    //     field: S,
-    //     inputs: &InputData,
-    //     default: Option<i64>,
-    // ) -> Result<i64> {
-    //     self.get_field(
-    //         field,
-    //         inputs,
-    //         i64::MIN,
-    //         Box::new(|r| *r),
-    //         Box::new(|v| {
-    //             v.as_i64().ok_or(anyhow!(NodeError::ConversionError(format!(
-    //                 "Field: {}, Type: {}",
-    //                 field.as_ref(),
-    //                 std::any::type_name::<i64>()
-    //             ))))
-    //         }),
-    //         default,
-    //     )
-    // }
-    //
-    // pub fn get_float_number_field_or(
-    //     &self,
-    //     field: &'static str,
-    //     inputs: &InputData,
-    //     default: Option<f64>,
-    // ) -> Result<f64> {
-    //     self.get_field(
-    //         field,
-    //         inputs,
-    //         f64::MIN,
-    //         Box::new(|r| *r),
-    //         Box::new(|v| {
-    //             v.as_f64().ok_or(anyhow!(NodeError::ConversionError(format!(
-    //                 "Field: {}, Type: {}",
-    //                 field,
-    //                 std::any::type_name::<f64>()
-    //             ))))
-    //         }),
-    //         default,
-    //     )
-    // }
-
-    // pub fn get_string_field_or(
-    //     &self,
-    //     field: &'static str,
-    //     inputs: &InputData,
-    //     default: Option<String>,
-    // ) -> Result<String> {
-    //     self.get_field(
-    //         field,
-    //         inputs,
-    //         String::default(),
-    //         Box::new(|r| r.to_owned()),
-    //         Box::new(|v| {
-    //             if let Value::String(s) = v {
-    //                 Ok(s.clone())
-    //             } else {
-    //                 Err(anyhow!(NodeError::ConversionError(format!(
-    //                     "Field: {}, Type: {}",
-    //                     field,
-    //                     std::any::type_name::<String>()
-    //                 ))))
-    //             }
-    //         }),
-    //         default,
-    //     )
-    // }
-
-    // pub fn get_json_field_or(
-    //     &self,
-    //     field: &'static str,
-    //     inputs: &InputData,
-    //     default: Option<Value>,
-    // ) -> Result<Value> {
-    //     self.get_field(
-    //         field,
-    //         inputs,
-    //         json!({}),
-    //         Box::new(|r| r.clone()),
-    //         Box::new(|v| {
-    //             serde_json::from_str(v.as_str().ok_or(anyhow!(
-    //                 "Field: {}, unable to get str value for deserialze",
-    //                 field.to_string()
-    //             ))?)
-    //             .map_err(|e| {
-    //                 anyhow!(NodeError::DeserializeError(
-    //                     field.to_string(),
-    //                     format!(
-    //                         "[{:?}]json({})",
-    //                         TypeId::of::<Value>(),
-    //                         v.as_str().unwrap_or_default()
-    //                     ),
-    //                     e
-    //                 ))
-    //             })
-    //         }),
-    //         default,
-    //     )
-    // }
-
-    pub fn get_as_json_field_or(
+    pub fn get_data<TValue: for<'de> Deserialize<'de>>(
         &self,
-        field: &'static str,
-        inputs: &InputData,
-        default: Option<Value>,
-    ) -> Result<Value> {
-        let err = format!(
-            "Field: {}, No josn, bool, i64, f64 or String value found",
-            field
-        );
-        inputs
-            .get(field)
-            .and_then(|i| {
-                i.get(
-                    &self
-                        .inputs
-                        .clone()
-                        .map(|i| i[field].connections[0].output.clone())
-                        .unwrap_or_default(),
-                )
-                .map(|r| {
-                    let NodeResult(v) = r;
-                    if v.is::<Value>() {
-                        v.get::<Value>().cloned().ok_or_else(||anyhow!(
-                            NodeError::ConversionError(
-                                "Unable to get `Value` as json field".to_owned()
-                            )
-                        ))
-                    } else if v.is::<bool>() {
-                        v.get::<bool>().map(|b| Value::Bool(*b)).ok_or(anyhow!(
-                            NodeError::ConversionError(
-                                "Unable to get `bool` as json field".to_owned()
-                            )
-                        ))
-                    } else if v.is::<i64>() {
-                        v.get::<i64>()
-                            .map(|i| Number::from(*i))
-                            .map(Value::Number)
-                            .ok_or(anyhow!(NodeError::ConversionError(
-                                "Unable to get `i64` as json field".to_owned()
-                            )))
-                    } else if v.is::<f64>() {
-                        v.get::<f64>()
-                            .and_then(|f| Number::from_f64(*f))
-                            .map(Value::Number)
-                            .ok_or(anyhow!(NodeError::ConversionError(
-                                "Unable to get `i64` as json field".to_owned()
-                            )))
-                    } else if v.is::<String>() {
-                        v.get::<String>()
-                            .map(|v| Value::String(v.clone()))
-                            .ok_or(anyhow!(NodeError::ConversionError(
-                                "Unable to get `String` as json field".to_owned()
-                            )))
-                    } else {
-                        default.clone().ok_or(anyhow!(err.to_owned()))
-                    }
-                })
+        key: &str,
+    ) -> Result<Option<TValue>, NodeError> {
+        self.data
+            .get(key)
+            .map(|v| {
+                serde_json::from_value(v.clone())
+                    .map_err(|e| NodeError::DeserializeError(key.to_string(), v.to_string(), e))
             })
-            .or(self
-                .data
-                .clone()
-                .and_then(|d| d.get(field).map(|v| Ok(v.clone()))))
-            .or(default.map(Ok))
-            .unwrap_or(Err(anyhow!(err)))
+            .transpose()
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use crate::InputConnection;
+
+    #[test]
+    fn test_get_data() {
+        let node = Node {
+            id: 1,
+            name: "test".to_string(),
+            data: {
+                let mut data = HashMap::new();
+                data.insert("test".to_string(), Value::Number(Number::from(1i32)));
+                data
+            },
+            group: None,
+            position: None,
+            inputs: Default::default(),
+            outputs: Default::default(),
+        };
+
+        let value: i32 = node.get_data("test").unwrap().unwrap();
+        assert_eq!(value, 1);
     }
 
-    pub fn get_as_json_field(&self, field: &'static str, inputs: &InputData) -> Result<Value> {
-        self.get_as_json_field_or(field, inputs, None)
-    }
-
-    // pub fn get_string_field(&self, field: &'static str, inputs: &InputData) -> Result<String> {
-    //     self.get_string_field_or(field, inputs, None)
-    // }
+    // #[test]
+    // fn test_get_input() {
+    //     let node = Node {
+    //         id: 1,
+    //         name: "test".to_string(),
+    //         data: Default::default(),
+    //         group: None,
+    //         position: None,
+    //         inputs: {
+    //             let mut inputs = HashMap::new();
+    //             inputs.insert(
+    //                 "test".to_string(),
+    //                 Input {
+    //                     connections: vec![InputConnection {
+    //                         node: 1,
+    //                         output: "test".to_string(),
+    //                         data: Default::default(),
+    //                     }],
+    //                 },
+    //             );
+    //             inputs
+    //         },
+    //         outputs: Default::default(),
+    //     };
     //
-    // pub fn get_number_field(&self, field: &'static str, inputs: &InputData) -> Result<i64> {
-    //     self.get_number_field_or(field, inputs, None)
-    // }
-    //
-    // pub fn get_float_number_field(&self, field: &'static str, inputs: &InputData) -> Result<f64> {
-    //     self.get_float_number_field_or(field, inputs, None)
-    // }
-
-    // pub fn get_json_field(&self, field: &'static str, inputs: &InputData) -> Result<Value> {
-    //     self.get_json_field_or(field, inputs, None)
+    //     let value: i32 = node.get_input("test").unwrap().unwrap();
+    //     assert_eq!(value, 1);
     // }
 }

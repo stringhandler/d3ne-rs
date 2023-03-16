@@ -27,6 +27,10 @@ pub enum EngineError {
     WorkerError(WorkerError),
     #[error(transparent)]
     Other(#[from] anyhow::Error),
+    #[error("Missing output: {node_id} {output_name}")]
+    MissingOutput { node_id: i64, output_name: String },
+    #[error("Invalid output type: {expected} != {actual}")]
+    InvalidOutputType { expected: String, actual: String },
 }
 
 pub struct Engine<TContext> {
@@ -53,8 +57,8 @@ impl<TContext> Engine<TContext> {
         if self.id != version {
             bail!(EngineError::VersionMismatch(self.id.to_string(), version));
         }
-        let nodess: HashMap<String, Node> = serde_json::from_value(value["nodes"].clone())?;
-        nodess
+        let nodes: HashMap<String, Node> = serde_json::from_value(value["nodes"].clone())?;
+        nodes
             .into_iter()
             .map(|(k, v)| Ok((k.parse::<i64>()?, v)))
             .collect::<Result<HashMap<_, _>>>()
@@ -66,8 +70,8 @@ impl<TContext> Engine<TContext> {
         context: &TContext,
         nodes: &HashMap<i64, Node>,
         start_node_id: i64,
-    ) -> Result<OutputData> {
-        let mut cache: HashMap<i64, OutputData> = HashMap::new();
+    ) -> Result<HashMap<String, OutputValue>> {
+        let mut cache = HashMap::new();
         let mut closed_nodes: Vec<i64> = Vec::new();
         let end_id = self.process_nodes(
             context,
@@ -76,7 +80,7 @@ impl<TContext> Engine<TContext> {
             &mut cache,
             &mut closed_nodes,
         )?;
-        Ok(cache[&end_id].clone().into())
+        Ok((*cache[&end_id]).clone())
     }
 
     fn process_node(
@@ -84,44 +88,42 @@ impl<TContext> Engine<TContext> {
         context: &TContext,
         node: &Node,
         nodes: &HashMap<i64, Node>,
-        cache: &mut HashMap<i64, OutputData>,
+        cache: &mut HashMap<i64, Rc<HashMap<String, OutputValue>>>,
         closed_nodes: &mut Vec<i64>,
-    ) -> Result<OutputData, EngineError> {
+    ) -> Result<Rc<HashMap<String, OutputValue>>, EngineError> {
         if cache.contains_key(&node.id) {
-            return Ok(cache[&node.id].clone().into());
+            return Ok(cache[&node.id].clone());
         }
         if closed_nodes.contains(&node.id) {
-            return Ok(Rc::new(HashMap::new()).into());
+            return Ok(Rc::new(HashMap::new()));
         }
 
-        let mut input_data: Vec<(String, OutputData)> = vec![];
-        for (name, input) in node.inputs.clone().unwrap_or_default().inner() {
+        let mut input_data: HashMap<String, OutputValue> = HashMap::new();
+        for (name, input) in &node.inputs {
             for conn in &input.connections {
                 if !closed_nodes.contains(&conn.node) {
                     let out =
                         self.process_node(context, &nodes[&conn.node], nodes, cache, closed_nodes)?;
-                    input_data.push((name.clone(), out.clone().into()));
-                    if !out.clone().contains_key(&conn.output) && conn.output != "action" {
-                        Self::disable_node_tree(&nodes[&conn.node], nodes, closed_nodes);
-                        Self::disable_node_tree(node, nodes, closed_nodes);
-                    }
+                    input_data.insert(
+                        name.clone(),
+                        out.get(&conn.output)
+                            .ok_or_else(|| EngineError::MissingOutput {
+                                node_id: conn.node,
+                                output_name: conn.output.clone(),
+                            })?
+                            .clone(),
+                    );
+                    // if !out.clone().contains_key(&conn.output) && conn.output != "action" {
+                    //     Self::disable_node_tree(&nodes[&conn.node], nodes, closed_nodes);
+                    //     Self::disable_node_tree(node, nodes, closed_nodes);
+                    // }
                 }
             }
         }
-        let mut output = Rc::new(HashMap::new()).into();
+        let mut output = Rc::new(HashMap::new());
         if !closed_nodes.contains(&node.id) {
-            output = self.workers.call(
-                &node.name,
-                context,
-                node,
-                input_data
-                    .into_iter()
-                    .fold(InputDataBuilder::default(), |b, (key, data)| {
-                        b.add_data(key, data)
-                    })
-                    .build(),
-            )?;
-            cache.insert(node.id, output.clone().into());
+            output = Rc::new(self.workers.call(&node.name, context, node, input_data)?);
+            cache.insert(node.id, output.clone());
         }
         Ok(output)
     }
@@ -131,14 +133,14 @@ impl<TContext> Engine<TContext> {
         context: &TContext,
         node: &Node,
         nodes: &HashMap<i64, Node>,
-        cache: &mut HashMap<i64, OutputData>,
+        cache: &mut HashMap<i64, Rc<HashMap<String, OutputValue>>>,
         closed_nodes: &mut Vec<i64>,
     ) -> Result<i64, EngineError> {
         let mut id: i64 = node.id;
         if !closed_nodes.contains(&node.id) {
             let outputdata = self.process_node(context, node, nodes, cache, closed_nodes)?;
-            for (name, output) in node.outputs.clone().unwrap_or_default().inner() {
-                if outputdata.contains_key(name) {
+            for (name, output) in node.outputs.clone() {
+                if outputdata.contains_key(&name) {
                     for connection in &output.connections {
                         if !closed_nodes.contains(&connection.node) {
                             id = self.process_nodes(
@@ -164,22 +166,18 @@ impl<TContext> Engine<TContext> {
         Ok(id)
     }
 
-    fn disable_node_tree(
-        node: &'_ Node,
-        nodes: &HashMap<i64, Node>,
-        closed_nodes: &mut Vec<i64>,
-    ) {
-        match node.inputs.clone().unwrap_or_default().get("action") {
+    fn disable_node_tree(node: &'_ Node, nodes: &HashMap<i64, Node>, closed_nodes: &mut Vec<i64>) {
+        match node.inputs.clone().get("action") {
             None => (),
             Some(input) => {
                 if input.connections.len() == 1 {
                     if !closed_nodes.contains(&node.id) {
                         closed_nodes.push(node.id);
                     }
-                    for output in node.outputs.clone().unwrap_or_default().inner().values() {
+                    for output in node.outputs.clone().values() {
                         for connection in &output.connections {
                             let _node = &nodes[&connection.node];
-                            if let Some(input) = _node.inputs.clone().unwrap_or_default().get("action") {
+                            if let Some(input) = _node.inputs.clone().get("action") {
                                 if input
                                     .connections
                                     .clone()

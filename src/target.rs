@@ -41,22 +41,6 @@ pub struct Output {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
-pub struct Inputs(HashMap<String, Input>);
-
-impl Inputs {
-    pub fn inner(&self) -> &HashMap<String, Input> {
-        &self.0
-    }
-}
-
-impl Deref for Inputs {
-    type Target = HashMap<String, Input>;
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug, Default)]
 pub struct Outputs(HashMap<String, Output>);
 
 impl Outputs {

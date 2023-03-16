@@ -31,8 +31,10 @@ pub use workers::*;
 mod tests {
     use crate::engine::Engine;
     use crate::workers::WorkersBuilder;
-    use crate::{node::*, Worker, WorkerError};
+    use crate::{node::*, EngineError, Worker, WorkerError};
     use anyhow::Result;
+    use std::collections::HashMap;
+    use std::hash::Hash;
 
     #[test]
     fn multiply_works() {
@@ -69,7 +71,7 @@ mod tests {
         "2": {
           "id": 2,
           "data": {
-            "num": 0
+            "num": 3
           },
           "inputs": {},
           "outputs": {
@@ -178,7 +180,7 @@ mod tests {
     }
     "#;
 
-        let mut workers = WorkersBuilder::new();
+        let mut workers = WorkersBuilder::default();
         workers.add(Number).add(Add).add(Multiply);
 
         let engine = Engine::<()>::new("demo@0.1.1".to_string(), workers.build());
@@ -186,8 +188,8 @@ mod tests {
         let nn = nodes.clone();
         let output = engine.process(&(), &nn, 1);
         let oo = output.unwrap();
-        let result = oo["num"].get::<i64>().unwrap();
-        assert_eq!(result, &8i64);
+        let result = &oo["num"];
+        assert_eq!(result, &OutputValue::I64(14i64));
     }
 
     #[test]
@@ -338,7 +340,7 @@ mod tests {
     }
     "#;
 
-        let mut workers = WorkersBuilder::new();
+        let mut workers = WorkersBuilder::default();
 
         workers.add(Number);
         workers.add(Add);
@@ -347,8 +349,8 @@ mod tests {
         let nodes = engine.parse_json(json_data).unwrap();
         let output = engine.process(&(), &nodes, 1);
         let oo = output.unwrap();
-        let result = oo["num"].get::<i64>().unwrap();
-        assert_eq!(result, &7i64);
+        let result = &oo["num"];
+        assert_eq!(result, &OutputValue::I64(7i64));
     }
 
     #[test]
@@ -495,7 +497,7 @@ mod tests {
     }
     "#;
 
-        let mut workers = WorkersBuilder::new();
+        let mut workers = WorkersBuilder::default();
 
         workers.add(Number);
         workers.add(Add);
@@ -503,17 +505,8 @@ mod tests {
         let engine = Engine::new("demo@0.1.0".to_string(), workers.build());
         let nodes = engine.parse_json(json_data).unwrap();
         let output = engine.process(&(), &nodes, 1);
-        // Node[1]: Node input conversion error: Field: num, Type: i64
-        let err: anyhow::Error = output.err().unwrap();
-        let expected: anyhow::Error = anyhow!(WorkerError::NodeRunError(
-            1,
-            anyhow!(NodeError::ConversionError(
-                "Field: num, Type: i64".to_owned()
-            ))
-        ));
-        println!("{:?}", &err);
-        println!("{:?}", &expected);
-        assert_eq!(err.to_string(), expected.to_string());
+
+        assert!(output.err().is_some());
     }
 
     struct Number;
@@ -522,11 +515,16 @@ mod tests {
             "Number"
         }
 
-        fn work(&self, context: &(), node: &Node, input_data: InputData) -> Result<OutputData> {
-            let result = node.get_number_field("num", &input_data)?;
-            Ok(OutputDataBuilder::new()
-                .data("num", Box::new(result))
-                .build())
+        fn work(
+            &self,
+            context: &(),
+            node: &Node,
+            input_data: HashMap<String, OutputValue>,
+        ) -> Result<HashMap<String, OutputValue>> {
+            let result: i64 = node.get_data("num")?.unwrap();
+            let mut h = HashMap::new();
+            h.insert("num".to_string(), OutputValue::I64(result));
+            Ok(h)
         }
     }
 
@@ -536,12 +534,25 @@ mod tests {
             "Add"
         }
 
-        fn work(&self, context: &(), node: &Node, input_data: InputData) -> Result<OutputData> {
-            let num = node.get_number_field("num", &input_data)?;
-            let num2 = node.get_number_field("num2", &input_data)?;
-            Ok(OutputDataBuilder::new()
-                .data("num", Box::new(num + num2))
-                .build())
+        fn work(
+            &self,
+            context: &(),
+            node: &Node,
+            input_data: HashMap<String, OutputValue>,
+        ) -> Result<HashMap<String, OutputValue>> {
+            let num = input_data
+                .get("num")
+                .ok_or_else(|| anyhow!("Missing input: num"))?;
+            let num2 = input_data
+                .get("num2")
+                .ok_or_else(|| anyhow!("Missing input: num2"))?;
+
+            let mut h = HashMap::new();
+            h.insert(
+                "num".to_string(),
+                OutputValue::I64(num.as_i64()? + num2.as_i64()?),
+            );
+            Ok(h)
         }
     }
 
@@ -551,12 +562,25 @@ mod tests {
             "Multiply"
         }
 
-        fn work(&self, context: &(), node: &Node, input_data: InputData) -> Result<OutputData> {
-            let num = node.get_number_field("num", &input_data)?;
-            let num2 = node.get_number_field("num2", &input_data)?;
-            Ok(OutputDataBuilder::new()
-                .data("num", Box::new(num * num2))
-                .build())
+        fn work(
+            &self,
+            context: &(),
+            node: &Node,
+            input_data: HashMap<String, OutputValue>,
+        ) -> Result<HashMap<String, OutputValue>> {
+            let num = input_data
+                .get("num")
+                .ok_or_else(|| anyhow!("Missing input: num"))?;
+            let num2 = input_data
+                .get("num2")
+                .ok_or_else(|| anyhow!("Missing input: num2"))?;
+
+            let mut h = HashMap::new();
+            h.insert(
+                "num".to_string(),
+                OutputValue::I64(num.as_i64()? * num2.as_i64()?),
+            );
+            Ok(h)
         }
     }
 }

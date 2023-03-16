@@ -26,7 +26,12 @@ pub enum WorkerError {
 
 pub trait Worker<TContext> {
     fn name(&self) -> &str;
-    fn work(&self, context: &TContext, node: &Node, input_data: InputData) -> Result<OutputData>;
+    fn work(
+        &self,
+        context: &TContext,
+        node: &Node,
+        input_data: HashMap<String, OutputValue>,
+    ) -> Result<HashMap<String, OutputValue>>;
 }
 
 pub struct Workers<TContext>(HashMap<String, Box<dyn Worker<TContext>>>);
@@ -37,8 +42,8 @@ impl<TContext> Workers<TContext> {
         name: &str,
         context: &TContext,
         node: &Node,
-        input: InputData,
-    ) -> Result<OutputData> {
+        input: HashMap<String, OutputValue>,
+    ) -> Result<HashMap<String, OutputValue>> {
         self.0
             .get(name)
             .map(|worker| {
@@ -54,7 +59,6 @@ pub struct WorkersBuilder<TContext> {
     data: Vec<(String, Box<dyn Worker<TContext>>)>,
 }
 
-
 impl<T> Default for WorkersBuilder<T> {
     fn default() -> Self {
         Self { data: vec![] }
@@ -63,7 +67,6 @@ impl<T> Default for WorkersBuilder<T> {
 
 #[allow(dead_code)]
 impl<TContext> WorkersBuilder<TContext> {
-
     pub fn add<A>(&mut self, worker: A) -> &mut Self
     where
         A: Worker<TContext> + 'static,
