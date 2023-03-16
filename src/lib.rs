@@ -31,10 +31,9 @@ pub use workers::*;
 mod tests {
     use crate::engine::Engine;
     use crate::workers::WorkersBuilder;
-    use crate::{node::*, EngineError, Worker, WorkerError};
+    use crate::{node::*, Worker};
     use anyhow::Result;
     use std::collections::HashMap;
-    use std::hash::Hash;
 
     #[test]
     fn multiply_works() {
@@ -185,7 +184,7 @@ mod tests {
 
         let engine = Engine::<()>::new("demo@0.1.1".to_string(), workers.build());
         let nodes = engine.parse_json(json_data).unwrap();
-        let nn = nodes.clone();
+        let nn = nodes;
         let output = engine.process(&(), &nn, 1);
         let oo = output.unwrap();
         let result = &oo["num"];
@@ -517,9 +516,9 @@ mod tests {
 
         fn work(
             &self,
-            context: &(),
+            _context: &(),
             node: &Node,
-            input_data: HashMap<String, OutputValue>,
+            _input_data: HashMap<String, OutputValue>,
         ) -> Result<HashMap<String, OutputValue>> {
             let result: i64 = node.get_data("num")?.unwrap();
             let mut h = HashMap::new();
@@ -536,8 +535,8 @@ mod tests {
 
         fn work(
             &self,
-            context: &(),
-            node: &Node,
+            _context: &(),
+            _node: &Node,
             input_data: HashMap<String, OutputValue>,
         ) -> Result<HashMap<String, OutputValue>> {
             let num = input_data
@@ -564,8 +563,8 @@ mod tests {
 
         fn work(
             &self,
-            context: &(),
-            node: &Node,
+            _context: &(),
+            _node: &Node,
             input_data: HashMap<String, OutputValue>,
         ) -> Result<HashMap<String, OutputValue>> {
             let num = input_data

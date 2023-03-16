@@ -15,11 +15,8 @@ use crate::{EngineError, Input, Output};
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::any::{Any, TypeId};
 use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
-use std::ops::Deref;
-use std::rc::Rc;
 use thiserror::Error;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -95,7 +92,7 @@ impl Node {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::InputConnection;
+    use serde_json::Number;
 
     #[test]
     fn test_get_data() {
